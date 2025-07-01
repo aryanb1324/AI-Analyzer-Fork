@@ -1,3 +1,5 @@
+"""Flask web application for querying Excel spreadsheets with GPT."""
+
 from flask import Flask, render_template, request, flash, redirect, url_for, session, jsonify
 import os
 import pandas as pd
@@ -15,9 +17,10 @@ import tempfile
 load_dotenv()
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024 
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024 * 1024
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 
+# In-memory store for uploaded file information and conversation history
 file_store = {}
 
 client = OpenAI()
@@ -162,7 +165,7 @@ Columns: {', '.join(file_info['column_names'])}
     return summary, errors, trends
 
 def ask_openai_with_enhanced_context(data_summary, user_question, errors, trends, qa_history=None, model="gpt-3.5-turbo"):
-    """Enhanced AI query with comprehensive financial analysis context and conversation history"""
+    """Send the user's question and data summary to OpenAI with extra context."""
     try:
         context_additions = []
         
@@ -229,7 +232,7 @@ Answer:"""
         return f"Error analyzing data: {str(e)}. Please check your OpenAI API configuration."
 
 def store_file_data(df, file_info, errors, trends, data_summary):
-    """Store file data in memory with unique ID"""
+    """Store dataframe and metadata in memory under a unique identifier."""
     file_id = str(uuid.uuid4())
     file_store[file_id] = {
         'dataframe': df,
@@ -262,24 +265,24 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Handle file upload and first question"""
+    """Process uploaded Excel file and send first question to OpenAI."""
     if 'file' not in request.files:
-        flash('No file selected')
+        flash('Please choose an Excel file to upload.')
         return redirect(url_for('index'))
     
     file = request.files['file']
     query = request.form.get('question', '').strip()
     
     if file.filename == '':
-        flash('No file selected')
+        flash('Please choose an Excel file to upload.')
         return redirect(url_for('index'))
     
     if not query:
-        flash('Please provide a question about the file')
+        flash('Enter a question about your spreadsheet so the AI knows what to analyze.')
         return redirect(url_for('index'))
     
     if not allowed_file(file.filename):
-        flash('Invalid file type. Please upload .xls or .xlsx files only.')
+        flash('Unsupported file format. Upload a .xls or .xlsx spreadsheet.')
         return redirect(url_for('index'))
     
     try:
@@ -341,12 +344,12 @@ def upload_file():
     
     except Exception as e:
         print(f"Error processing file: {str(e)}")
-        flash(f'Error processing file: {str(e)}')
+        flash("We couldn't read your Excel file. Try uploading a .xlsx file with data in the first sheet.")
         return redirect(url_for('index'))
 
 @app.route('/ask_question', methods=['POST'])
 def ask_question():
-    """Handle follow-up questions about already uploaded file"""
+    """Answer additional user questions using stored file data."""
     file_id = request.form.get('file_id')
     question = request.form.get('question', '').strip()
     
@@ -355,7 +358,7 @@ def ask_question():
     
     file_data = get_file_data(file_id)
     if not file_data:
-        return jsonify({'error': 'File data not found. Please upload the file again.'}), 404
+        return jsonify({'error': 'We could not find your uploaded file. Please upload it again.'}), 404
     
     try:
 
@@ -381,10 +384,10 @@ def ask_question():
 
 @app.route('/chat/<file_id>')
 def chat_interface(file_id):
-    """Display chat interface for specific file"""
+    """Render the conversation page for a previously uploaded file."""
     file_data = get_file_data(file_id)
     if not file_data:
-        flash('File data not found. Please upload the file again.')
+        flash('We could not find your uploaded file. Please upload it again.')
         return redirect(url_for('index'))
     
     df = file_data['dataframe']
@@ -404,13 +407,13 @@ def chat_interface(file_id):
 @app.errorhandler(413)
 def too_large(e):
     """Handle file too large error"""
-    flash("File is too large. Maximum size is 5GB.")
+    flash("The file is too large. Please upload a spreadsheet under 5 GB.")
     return redirect(url_for('index'))
 
 
 @app.before_request
 def cleanup_old_files():
-    """Remove files older than 1 hour"""
+    """Remove file data from memory if it is older than one hour."""
     current_time = datetime.now()
     to_remove = []
     for file_id, data in file_store.items():
